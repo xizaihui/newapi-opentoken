@@ -187,9 +187,99 @@ func buildAwsRequestBody(c *gin.Context, info *relaycommon.RelayInfo, awsClaudeR
 		}
 		delete(data, "model")
 		delete(data, "stream")
+		sanitizeAwsRequestMap(data, info)
 		return common.Marshal(data)
 	}
-	return common.Marshal(awsClaudeReq)
+	resultBytes, err := common.Marshal(awsClaudeReq)
+	if err != nil {
+		return nil, err
+	}
+	// Post-process: sanitize the final JSON for Bedrock compatibility
+	var data map[string]interface{}
+	if err := common.Unmarshal(resultBytes, &data); err != nil {
+		return resultBytes, nil // fallback to original
+	}
+	sanitizeAwsRequestMap(data, info)
+	return common.Marshal(data)
+}
+
+// sanitizeAwsRequestMap applies Bedrock-specific fixes to the request body map:
+// 1. Remove thinking blocks with signatures from messages
+// 2. Remove empty text content blocks
+// 3. Fix thinking.type for models that only support adaptive
+// 4. Remove temperature for models that deprecate it
+// 5. Filter anthropic_beta flags
+// 6. Remove thinking when tool_choice forces tool use
+func sanitizeAwsRequestMap(data map[string]interface{}, info *relaycommon.RelayInfo) {
+	// Sanitize messages
+	if messages, ok := data["messages"].([]interface{}); ok {
+		data["messages"] = relaycommon.SanitizeBedrockMessages(messages)
+	}
+
+	model := ""
+	if info != nil {
+		model = info.UpstreamModelName
+	}
+
+	// Remove temperature for Opus 4.6/4.7 models (they deprecate it entirely)
+	if strings.Contains(model, "opus-4-7") || strings.Contains(model, "opus-4-6") {
+		delete(data, "temperature")
+		delete(data, "top_p")
+		delete(data, "top_k")
+	}
+
+	// Fix thinking
+	if thinking, ok := data["thinking"].(map[string]interface{}); ok {
+		thinkingType, _ := thinking["type"].(string)
+
+		// Remove temperature/top_p/top_k when thinking is present (any model)
+		delete(data, "temperature")
+		delete(data, "top_p")
+		delete(data, "top_k")
+
+		// Convert thinking.type="enabled" to "adaptive" for Opus 4.6/4.7 models
+		if thinkingType == "enabled" {
+			if strings.Contains(model, "opus-4-7") || strings.Contains(model, "opus-4-6") {
+				thinking["type"] = "adaptive"
+				delete(thinking, "budget_tokens")
+				if _, hasOutput := data["output_config"]; !hasOutput {
+					data["output_config"] = map[string]interface{}{"effort": "high"}
+				}
+			}
+		}
+
+		// Remove thinking when tool_choice forces tool use
+		if toolChoice, hasTC := data["tool_choice"]; hasTC {
+			if tcMap, ok := toolChoice.(map[string]interface{}); ok {
+				if tcType, _ := tcMap["type"].(string); tcType == "tool" || tcType == "any" {
+					delete(data, "thinking")
+				}
+			}
+		}
+	}
+
+	// Filter anthropic_beta flags
+	if betaRaw, ok := data["anthropic_beta"]; ok {
+		switch beta := betaRaw.(type) {
+		case []interface{}:
+			flags := make([]string, 0, len(beta))
+			for _, f := range beta {
+				if s, ok := f.(string); ok {
+					flags = append(flags, s)
+				}
+			}
+			filtered := relaycommon.FilterBedrockBetaFlags(flags)
+			if len(filtered) > 0 {
+				filteredIface := make([]interface{}, len(filtered))
+				for i, f := range filtered {
+					filteredIface[i] = f
+				}
+				data["anthropic_beta"] = filteredIface
+			} else {
+				delete(data, "anthropic_beta")
+			}
+		}
+	}
 }
 
 func getAwsRegionPrefix(awsRegionId string) string {

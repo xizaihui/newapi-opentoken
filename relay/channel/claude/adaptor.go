@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -77,6 +78,18 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 		req.Set("anthropic-beta", anthropicBeta)
 	}
 	model_setting.GetClaudeSettings().WriteHeaders(info.OriginModelName, req)
+
+	// Filter beta flags for Bedrock compatibility when channel is AWS type
+	// Also filter for Anthropic channels that may proxy to Bedrock
+	if finalBeta := req.Get("anthropic-beta"); finalBeta != "" {
+		flags := strings.Split(finalBeta, ",")
+		filtered := relaycommon.FilterBedrockBetaFlags(flags)
+		if len(filtered) > 0 {
+			req.Set("anthropic-beta", strings.Join(filtered, ","))
+		} else {
+			req.Del("anthropic-beta")
+		}
+	}
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {

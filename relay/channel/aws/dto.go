@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 )
@@ -38,11 +39,38 @@ func formatRequest(requestBody io.Reader, requestHeader http.Header) (*AwsClaude
 	}
 	awsClaudeRequest.AnthropicVersion = "bedrock-2023-05-31"
 
-	// check header anthropic-beta
+	// Sanitize messages: remove thinking blocks with signatures and empty text blocks
+	if len(awsClaudeRequest.Messages) > 0 {
+		rawMessages := make([]interface{}, 0, len(awsClaudeRequest.Messages))
+		for _, msg := range awsClaudeRequest.Messages {
+			msgBytes, _ := json.Marshal(msg)
+			var msgMap map[string]interface{}
+			if json.Unmarshal(msgBytes, &msgMap) == nil {
+				rawMessages = append(rawMessages, msgMap)
+			}
+		}
+		rawMessages = relaycommon.SanitizeBedrockMessages(rawMessages)
+		// Convert back to ClaudeMessage
+		cleanedBytes, _ := json.Marshal(rawMessages)
+		var cleanedMessages []dto.ClaudeMessage
+		if json.Unmarshal(cleanedBytes, &cleanedMessages) == nil {
+			awsClaudeRequest.Messages = cleanedMessages
+		}
+	}
+
+	// Remove temperature for models that deprecate it (check via Thinking field)
+	// Models with thinking/adaptive mode reject temperature
+	if awsClaudeRequest.Temperature != nil && awsClaudeRequest.Thinking != nil {
+		awsClaudeRequest.Temperature = nil
+	}
+
+	// check header anthropic-beta and filter for Bedrock compatibility
 	anthropicBetaValues := requestHeader.Get("anthropic-beta")
 	if len(anthropicBetaValues) > 0 {
 		var tempArray []string
 		tempArray = strings.Split(anthropicBetaValues, ",")
+		// Filter beta flags based on BedrockBetaFlagsSupported/Unsupported options
+		tempArray = relaycommon.FilterBedrockBetaFlags(tempArray)
 		if len(tempArray) > 0 {
 			betaJson, err := json.Marshal(tempArray)
 			if err != nil {

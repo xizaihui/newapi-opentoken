@@ -544,7 +544,18 @@ func (channel *Channel) Update() error {
 		}
 	}
 	var err error
-	err = DB.Model(channel).Updates(channel).Error
+	// Use Select to ensure pointer fields with zero-value (empty string) are also updated
+	// Note: Key is excluded because the frontend does not send it on update (security)
+	err = DB.Model(channel).Select(
+		"Type", "OpenAIOrganization", "TestModel", "Status", "Name", "Weight",
+		"BaseURL", "Other", "Models", "Group", "ModelMapping",
+		"StatusCodeMapping", "Priority", "AutoBan", "Tag", "Setting",
+		"ParamOverride", "HeaderOverride", "Remark", "ChannelInfo", "OtherSettings",
+	).Updates(channel).Error
+	// If Key is explicitly provided (non-empty), update it separately
+	if err == nil && channel.Key != "" {
+		err = DB.Model(channel).Update("key", channel.Key).Error
+	}
 	if err != nil {
 		return err
 	}

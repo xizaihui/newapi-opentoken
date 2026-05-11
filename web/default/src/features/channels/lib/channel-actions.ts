@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { formatCurrencyFromUSD } from '@/lib/currency'
 import {
   copyChannel,
+  getChannel,
   deleteChannel,
   testChannel,
   updateChannel,
@@ -145,7 +146,14 @@ export async function handleUpdateChannelField(
   onSuccess?: () => void
 ): Promise<void> {
   try {
-    const response = await updateChannel(id, { [fieldName]: value })
+    // Fetch full channel data first to avoid zeroing out fields on partial PUT
+    const channelRes = await getChannel(id)
+    if (!channelRes.success || !channelRes.data) {
+      toast.error(i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
+      return
+    }
+    const fullChannel = channelRes.data
+    const response = await updateChannel(id, { ...fullChannel, [fieldName]: value })
     if (response.success) {
       // Show success toast with field name
       const fieldLabel =
