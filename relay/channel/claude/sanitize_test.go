@@ -209,6 +209,17 @@ func TestSanitize_ReplacesEmptiedAssistantContentWithPlaceholder(t *testing.T) {
 	}
 }
 
+func TestSanitize_DropsContextManagement(t *testing.T) {
+	req := &dto.ClaudeRequest{
+		Model:             "claude-opus-4-7",
+		ContextManagement: json.RawMessage(`{"max_input_tokens": 100000}`),
+	}
+	SanitizeRequestForAnthropic(req)
+	if req.ContextManagement != nil {
+		t.Fatalf("context_management should be dropped, got %s", string(req.ContextManagement))
+	}
+}
+
 func TestSanitize_RoundTripsViaJsonAfterDeepCopy(t *testing.T) {
 	temp := 0.7
 	topP := 0.9

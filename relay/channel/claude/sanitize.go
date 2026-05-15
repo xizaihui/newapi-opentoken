@@ -22,6 +22,11 @@ import (
 //     Anthropic rejects those as `Invalid signature in thinking block`. We
 //     drop the offending blocks so the request still succeeds.
 //
+//  4. `context_management` is not yet accepted by the official Anthropic
+//     Claude API and triggers `Extra inputs are not permitted` 400 errors
+//     when clients pass it through. Strip it preemptively. Channels that
+//     opt into pass-through skip this entire function.
+//
 // Sanitization is a best-effort safety net. Channels that opt into pass-through
 // mode (channel.pass_through_body_enabled or global PassThroughRequestEnabled)
 // bypass this entirely because ConvertClaudeRequest is not invoked.
@@ -56,6 +61,9 @@ func SanitizeRequestForAnthropic(request *dto.ClaudeRequest) {
 
 	// (3) Strip thinking blocks with damaged signatures from assistant turns.
 	stripInvalidThinkingBlocks(request)
+
+	// (4) Drop context_management until Anthropic publishes the official API.
+	request.ContextManagement = nil
 }
 
 // claudeRejectsTempAndTopP returns true for models that return HTTP 400 when
