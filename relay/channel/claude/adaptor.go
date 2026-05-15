@@ -26,6 +26,9 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	// Sanitize fields that the Anthropic Claude official API rejects with HTTP
+	// 400. AWS Bedrock requests use relay/channel/aws and are unaffected.
+	SanitizeRequestForAnthropic(request)
 	return request, nil
 }
 
