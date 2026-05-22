@@ -288,7 +288,15 @@ export function ApiKeysMutateDrawer({
         <Form {...form}>
           <form
             id='api-key-form'
-            onSubmit={form.handleSubmit(onSubmit)}
+            onSubmit={form.handleSubmit(onSubmit, (errors) => {
+              console.error('[api-key-form] validation errors:', errors)
+              const firstError = Object.values(errors)[0] as { message?: string } | undefined
+              toast.error(
+                firstError?.message
+                  ? `${t('Form validation failed')}: ${firstError.message}`
+                  : t('Form validation failed - check console')
+              )
+            })}
             className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3 sm:space-y-4 sm:px-4 sm:py-4'
           >
             <ApiKeyFormSection

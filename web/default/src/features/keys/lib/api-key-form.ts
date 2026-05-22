@@ -25,17 +25,34 @@ import { type ApiKeyFormData, type ApiKey } from '../types'
 // Form Schema
 // ============================================================================
 
-export const apiKeyFormSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  remain_quota_dollars: z.number().min(0).optional(),
-  expired_time: z.date().optional(),
-  unlimited_quota: z.boolean(),
-  model_limits: z.array(z.string()),
-  allow_ips: z.string().optional(),
-  group: z.string().optional(),
-  cross_group_retry: z.boolean().optional(),
-  tokenCount: z.number().min(1).optional(),
-})
+export const apiKeyFormSchema = z
+  .object({
+    name: z.string().min(1, 'Name is required'),
+    // 放宽 min(0)：只在 unlimited_quota=false 时才需要 >=0
+    // 老 key 在数据库可能存了 -1 或负数遗留值，但用户开启了无限额度时不该被这个挡
+    remain_quota_dollars: z.number().optional(),
+    expired_time: z.date().optional(),
+    unlimited_quota: z.boolean(),
+    model_limits: z.array(z.string()),
+    allow_ips: z.string().optional(),
+    group: z.string().optional(),
+    cross_group_retry: z.boolean().optional(),
+    tokenCount: z.number().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.unlimited_quota) {
+      if (
+        data.remain_quota_dollars === undefined ||
+        data.remain_quota_dollars < 0
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['remain_quota_dollars'],
+          message: 'Quota must be >= 0 when unlimited quota is disabled',
+        })
+      }
+    }
+  })
 
 export type ApiKeyFormValues = z.infer<typeof apiKeyFormSchema>
 
@@ -100,7 +117,8 @@ export function transformApiKeyToFormDefaults(
 ): ApiKeyFormValues {
   return {
     name: apiKey.name,
-    remain_quota_dollars: quotaUnitsToDollars(apiKey.remain_quota),
+    // 兜底：老 key 可能存了负数遗留值；显示时夹到 0
+    remain_quota_dollars: Math.max(0, quotaUnitsToDollars(apiKey.remain_quota)),
     expired_time:
       apiKey.expired_time > 0
         ? new Date(apiKey.expired_time * 1000)
