@@ -56,6 +56,7 @@ import {
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { MultiSelect } from '@/components/multi-select'
+import { UserGroupRatioEditor } from './user-group-ratio-editor'
 import { createUser, updateUser, getUser, getGroups } from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -327,6 +328,18 @@ export function UsersMutateDrawer({
                   }}
                 />
               </div>
+
+              {/* Phase 2: Per-Group Ratio Overrides (Update only) */}
+              {isUpdate && currentRow && (
+                <UserGroupRatioEditor
+                  userId={currentRow.id}
+                  groupOptions={(form.watch('group') || '')
+                    .split(',')
+                    .map((g) => g.trim())
+                    .filter(Boolean)}
+                />
+              )}
+
               {isUpdate && (
                 <div className='space-y-4'>
                   <h3 className='text-sm font-medium'>{t('Quota')}</h3>

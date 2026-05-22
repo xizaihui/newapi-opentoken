@@ -3,6 +3,7 @@ package service
 import (
 	"strings"
 
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
@@ -134,16 +135,32 @@ func GetUserAutoGroup(userGroup string) []string {
 	return autoGroups
 }
 
-// GetUserGroupRatio 获取用户使用某个分组的倍率
-// userGroup 用户分组（可能是逗号分隔的多分组）
-// group 需要获取倍率的分组
-//
-// 查找顺序（兼容多分组，Phase 1）：
-//  1. 遍历用户的每个授权分组，查 GroupGroupRatio[userGroup][group]，命中则返回（用户组级覆盖）
-//  2. 回落到全局 GroupRatio[group]
-//
-// 注意：Phase 2 会在最前面再加一层 UserGroupRatio[userId][group] 覆盖。
+// GetUserGroupRatio 获取用户使用某个分组的倍率（旧签名，保留兼容）
+// 优先级：用户组级覆盖 > 全局；不查用户级覆盖（无 userId 信息）
+// 计费链路应该用 GetUserGroupRatioWithUser 走完整 3 层查询。
 func GetUserGroupRatio(userGroup, group string) float64 {
+	for _, g := range SplitUserGroups(userGroup) {
+		if ratio, ok := ratio_setting.GetGroupGroupRatio(g, group); ok {
+			return ratio
+		}
+	}
+	return ratio_setting.GetGroupRatio(group)
+}
+
+// GetUserGroupRatioWithUser Phase 2 完整查询，加用户级覆盖层
+// 查找顺序：
+//  1. UserGroupRatio[userId][group] (用户级覆盖，新)
+//  2. GroupGroupRatio[userGroup][group] (用户组级覆盖，原有)
+//  3. GroupRatio[group] (全局)
+//
+// userId <= 0 时跳过第 1 层；行为完全等价 GetUserGroupRatio。
+// 计费链路必须走这个函数（不要走旧的 GetUserGroupRatio）。
+func GetUserGroupRatioWithUser(userId int, userGroup, group string) float64 {
+	if userId > 0 {
+		if ratio, ok := model.LookupUserGroupRatio(userId, group); ok {
+			return ratio
+		}
+	}
 	for _, g := range SplitUserGroups(userGroup) {
 		if ratio, ok := ratio_setting.GetGroupGroupRatio(g, group); ok {
 			return ratio

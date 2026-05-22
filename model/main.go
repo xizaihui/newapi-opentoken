@@ -281,6 +281,7 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&UserGroupRatio{}, // Phase 2: per-user group ratio override
 	)
 	if err != nil {
 		return err

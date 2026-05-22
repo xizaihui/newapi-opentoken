@@ -49,9 +49,16 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
 
-	// check user group special ratio
-	userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup)
-	if ok {
+	// Phase 2: 完整 3 层倍率查询
+	// 1) UserGroupRatio[userId][group] (用户级覆盖)
+	// 2) GroupGroupRatio[userGroup][group] (用户组级覆盖)
+	// 3) GroupRatio[group] (全局)
+	if userOverride, ok := model.LookupUserGroupRatio(relayInfo.UserId, relayInfo.UsingGroup); ok {
+		// user-level override (Phase 2 新增)
+		groupRatioInfo.GroupSpecialRatio = userOverride
+		groupRatioInfo.GroupRatio = userOverride
+		groupRatioInfo.HasSpecialRatio = true
+	} else if userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup); ok {
 		// user group special ratio
 		groupRatioInfo.GroupSpecialRatio = userGroupRatio
 		groupRatioInfo.GroupRatio = userGroupRatio

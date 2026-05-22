@@ -181,3 +181,43 @@ export async function adminUnbindCustomOAuth(
   )
   return res.data
 }
+
+// ============================================================================
+// Phase 2: Per-User Group Ratio Override APIs
+// ============================================================================
+
+/**
+ * Get all per-group ratio overrides for a user.
+ * Returns: { group_a: 0.8, group_b: 0.9 }
+ */
+export async function getUserGroupRatios(
+  userId: number
+): Promise<ApiResponse<Record<string, number>>> {
+  const res = await api.get(`/api/user/${userId}/group_ratios`)
+  return res.data
+}
+
+/**
+ * Set all per-group ratio overrides for a user (full replacement).
+ * Empty object clears all overrides.
+ */
+export async function setUserGroupRatios(
+  userId: number,
+  ratios: Record<string, number>
+): Promise<ApiResponse<null>> {
+  const res = await api.put(`/api/user/${userId}/group_ratios`, { ratios })
+  return res.data
+}
+
+/**
+ * Delete a single group ratio override.
+ */
+export async function deleteUserGroupRatio(
+  userId: number,
+  group: string
+): Promise<ApiResponse<null>> {
+  const res = await api.delete(
+    `/api/user/${userId}/group_ratios/${encodeURIComponent(group)}`
+  )
+  return res.data
+}
