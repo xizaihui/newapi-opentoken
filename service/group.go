@@ -42,6 +42,8 @@ func GetUserPrimaryGroup(userGroup string) string {
 }
 
 // applyGroupSpecialUsable 把单个分组的 GroupSpecialUsableGroup 配置 merge 到 groupsCopy。
+// 用法：先把用户授权分组放入 groupsCopy，再对每个授权分组应用 special 规则
+// (+: 添加 / -: 移除 / 直接添加)。
 func applyGroupSpecialUsable(groupsCopy map[string]string, userGroup string) {
 	specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
 	if !b {
@@ -60,24 +62,59 @@ func applyGroupSpecialUsable(groupsCopy map[string]string, userGroup string) {
 	}
 }
 
-// GetUserUsableGroups 返回用户当前可用的分组及描述。
-// userGroup 可以是逗号分隔的多分组（feat: per-user multi-group authorization, 2026-05-22）。
-// 兼容旧的单分组语义：传入单个分组时行为完全等价于以前。
+// GetUserUsableGroups 返回用户严格可用的分组及描述。
+//
+// **新语义 (2026-05-22, Phase 1.5)**:
+//   - userGroup 为空（匿名/未配置）→ 返回 default 分组（公开预览 fallback）
+//   - userGroup 非空 → 严格只返回该用户被显式授权的分组
+//     （逗号分隔多分组），再叠加 GroupSpecialUsableGroup 的 +:/-: 规则
+//
+// 不再依赖全局 setting.UserUsableGroupsCopy 作为基础集合 —— 那个配置
+// 现在只作为 setting 元数据（描述/排序），不决定用户可见性。
+//
+// 管理员特权由 caller (controller) 自行加（不在这层处理）。
 func GetUserUsableGroups(userGroup string) map[string]string {
-	groupsCopy := setting.GetUserUsableGroupsCopy()
+	result := make(map[string]string)
+	settingGroups := setting.GetUserUsableGroupsCopy()
+
 	userGroups := SplitUserGroups(userGroup)
 	if len(userGroups) == 0 {
-		return groupsCopy
+		// 匿名/无配置 fallback：default 分组（如果 setting 里有描述就用，否则给个默认）
+		desc, ok := settingGroups["default"]
+		if !ok {
+			desc = "默认分组"
+		}
+		result["default"] = desc
+		return result
 	}
+
 	for _, g := range userGroups {
-		// 每个授权分组都应用一次 special 规则（+: / -: / 直接添加）
-		applyGroupSpecialUsable(groupsCopy, g)
-		// 确保该分组本身在结果集中
-		if _, ok := groupsCopy[g]; !ok {
-			groupsCopy[g] = "用户分组"
+		// 1) 加入授权分组本身
+		desc, ok := settingGroups[g]
+		if !ok {
+			desc = "用户分组"
+		}
+		result[g] = desc
+		// 2) 应用该分组的 special 规则（+: / -: / 直接添加）
+		applyGroupSpecialUsable(result, g)
+	}
+
+	return result
+}
+
+// GetAllGroupsForAdmin 返回所有全局已知分组（用于管理员特权 view-all）。
+// 数据源：GroupRatio 配置（全局所有定义了倍率的分组），描述从 UserUsableGroups 取，没有则用分组名。
+func GetAllGroupsForAdmin() map[string]string {
+	result := make(map[string]string)
+	settingGroups := setting.GetUserUsableGroupsCopy()
+	for groupName := range ratio_setting.GetGroupRatioCopy() {
+		if desc, ok := settingGroups[groupName]; ok {
+			result[groupName] = desc
+		} else {
+			result[groupName] = groupName
 		}
 	}
-	return groupsCopy
+	return result
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
@@ -101,7 +138,7 @@ func GetUserAutoGroup(userGroup string) []string {
 // userGroup 用户分组（可能是逗号分隔的多分组）
 // group 需要获取倍率的分组
 //
-// 查找顺序（新语义，兼容旧逻辑）：
+// 查找顺序（兼容多分组，Phase 1）：
 //  1. 遍历用户的每个授权分组，查 GroupGroupRatio[userGroup][group]，命中则返回（用户组级覆盖）
 //  2. 回落到全局 GroupRatio[group]
 //
