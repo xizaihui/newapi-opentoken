@@ -55,6 +55,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { MultiSelect } from '@/components/multi-select'
 import { createUser, updateUser, getUser, getGroups } from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -295,46 +296,40 @@ export function UsersMutateDrawer({
                 />
               </div>
 
-              {/* Group & Quota Settings (Update only) */}
-              {isUpdate && (
-                <div className='space-y-4'>
-                  <h3 className='text-sm font-medium'>{t('Group & Quota')}</h3>
-
-                  <FormField
-                    control={form.control}
-                    name='group'
-                    render={({ field }) => (
+              {/* Group field: 始终展示（创建+更新都需要），多分组授权 */}
+              <div className='space-y-4'>
+                <h3 className='text-sm font-medium'>{t('Group')}</h3>
+                <FormField
+                  control={form.control}
+                  name='group'
+                  render={({ field }) => {
+                    const selected = (field.value || '')
+                      .split(',')
+                      .map((g) => g.trim())
+                      .filter(Boolean)
+                    return (
                       <FormItem>
-                        <FormLabel>{t('Group')}</FormLabel>
-                        <Select
-                          items={[
-                            ...groups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
-                          onValueChange={field.onChange}
-                          value={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder={t('Select a group')} />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent alignItemWithTrigger={false}>
-                            <SelectGroup>
-                              {groups.map((group) => (
-                                <SelectItem key={group} value={group}>
-                                  {group}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        <FormLabel>{t('Usable Groups')}</FormLabel>
+                        <FormControl>
+                          <MultiSelect
+                            options={groups.map((g) => ({ value: g, label: g }))}
+                            selected={selected}
+                            onChange={(vals) => field.onChange(vals.join(','))}
+                            placeholder={t('Select one or more groups')}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('User can access models from all selected groups. The first group is the primary group.')}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
-                    )}
-                  />
+                    )
+                  }}
+                />
+              </div>
+              {isUpdate && (
+                <div className='space-y-4'>
+                  <h3 className='text-sm font-medium'>{t('Quota')}</h3>
 
                   <FormField
                     control={form.control}
