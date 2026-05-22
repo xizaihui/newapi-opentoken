@@ -258,6 +258,24 @@ func sanitizeAwsRequestMap(data map[string]interface{}, info *relaycommon.RelayI
 		}
 	}
 
+	// Sanitize output_config: Bedrock only accepts "effort", remove other fields like "format"
+	if outputConfig, ok := data["output_config"].(map[string]interface{}); ok {
+		allowedKeys := map[string]bool{"effort": true}
+		for k := range outputConfig {
+			if !allowedKeys[k] {
+				delete(outputConfig, k)
+			}
+		}
+		if len(outputConfig) == 0 {
+			delete(data, "output_config")
+		}
+	}
+
+	// Remove Bedrock-unsupported top-level fields
+	delete(data, "output_format")
+	delete(data, "container")
+	delete(data, "context_management")
+
 	// Filter anthropic_beta flags
 	if betaRaw, ok := data["anthropic_beta"]; ok {
 		switch beta := betaRaw.(type) {

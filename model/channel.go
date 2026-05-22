@@ -543,22 +543,31 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
+	// === fix-zerovalue patch (2026-05-21) ===
+	// 替代 Select(...).Updates(channel)：前端稀疏 PUT（如禁用按钮只发 {id,status}）
+	// 会让 Select 列出的所有字段被零值覆盖，整行清空。
+	// 改成：先 fetch 原对象，再用前端发来的非零字段 merge 进去。
+	// 副作用：不能通过此接口把字段从有值改成空字符串（需要 PATCH 接口或 sentinel）。
 	var err error
-	// Use Select to ensure pointer fields with zero-value (empty string) are also updated
-	// Note: Key is excluded because the frontend does not send it on update (security)
-	err = DB.Model(channel).Select(
-		"Type", "OpenAIOrganization", "TestModel", "Status", "Name", "Weight",
-		"BaseURL", "Other", "Models", "Group", "ModelMapping",
-		"StatusCodeMapping", "Priority", "AutoBan", "Tag", "Setting",
-		"ParamOverride", "HeaderOverride", "Remark", "ChannelInfo", "OtherSettings",
-	).Updates(channel).Error
-	// If Key is explicitly provided (non-empty), update it separately
-	if err == nil && channel.Key != "" {
-		err = DB.Model(channel).Update("key", channel.Key).Error
-	}
-	if err != nil {
+	var existing Channel
+	if err = DB.First(&existing, channel.Id).Error; err != nil {
 		return err
 	}
+	// 非零字段更新（GORM 默认行为）
+	if err = DB.Model(&existing).Updates(channel).Error; err != nil {
+		return err
+	}
+	// ChannelInfo 是 struct，零值时 GORM 不写；controller 已经 merge 好
+	if err = DB.Model(&existing).Update("channel_info", channel.ChannelInfo).Error; err != nil {
+		return err
+	}
+	// Key 单独处理：前端不发就保持原值
+	if channel.Key != "" {
+		if err = DB.Model(&existing).Update("key", channel.Key).Error; err != nil {
+			return err
+		}
+	}
+	// === END fix-zerovalue patch ===
 	DB.Model(channel).First(channel, "id = ?", channel.Id)
 	err = channel.UpdateAbilities(nil)
 	return err

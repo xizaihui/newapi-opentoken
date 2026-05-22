@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	claudechannel "github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -151,7 +152,23 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.ReaderOnly(storage)
+		// Apply sanitizer fixes (a + c) on the raw JSON body so pass-through
+		// requests get the same protections as the converted path. Fail-open:
+		// any error inside SanitizeClaudeRawBody returns the original bytes.
+		if rawBytes, berr := storage.Bytes(); berr == nil {
+			if sanitized, changed := claudechannel.SanitizeClaudeRawBody(rawBytes); changed {
+				requestBody = bytes.NewBuffer(sanitized)
+			} else {
+				// No change — rewind storage and reuse the original reader.
+				if _, serr := storage.Seek(0, io.SeekStart); serr == nil {
+					requestBody = common.ReaderOnly(storage)
+				} else {
+					requestBody = bytes.NewBuffer(rawBytes)
+				}
+			}
+		} else {
+			requestBody = common.ReaderOnly(storage)
+		}
 	} else {
 		convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)
 		if err != nil {

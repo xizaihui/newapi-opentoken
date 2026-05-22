@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
+	channelconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -26,7 +28,100 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	// Fix #a: remove empty text blocks AND unsigned thinking blocks (multi-turn replay
+	// often drops the original signature, which Anthropic then rejects with 400).
+	sanitizeClaudeMessages(request.Messages)
+	stripDeprecatedFields(request)
+	// Fix #c: haiku models do not support adaptive thinking; strip the config so the
+	// upstream returns 200 instead of 400 "adaptive thinking is not supported on this model".
+	fixUnsupportedThinking(request)
 	return request, nil
+}
+
+// sanitizeClaudeMessages mutates in place: removes empty text blocks, drops unsigned
+// thinking blocks on assistant turns, and ensures each message has at least one block.
+func sanitizeClaudeMessages(messages []dto.ClaudeMessage) {
+	for i := range messages {
+		msg := &messages[i]
+		// String content: empty string -> single space
+		if s, ok := msg.Content.(string); ok {
+			if s == "" {
+				msg.Content = " "
+			}
+			continue
+		}
+		// Array content
+		arr, ok := msg.Content.([]interface{})
+		if !ok {
+			continue
+		}
+		filtered := make([]interface{}, 0, len(arr))
+		droppedThinking := 0
+		for _, block := range arr {
+			blockMap, ok := block.(map[string]interface{})
+			if !ok {
+				filtered = append(filtered, block)
+				continue
+			}
+			blockType, _ := blockMap["type"].(string)
+			if blockType == "text" {
+				text, _ := blockMap["text"].(string)
+				if text == "" {
+					continue
+				}
+			}
+			// Fix #a: drop assistant thinking blocks missing a signature. Anthropic
+			// requires the original signature to be replayed verbatim; clients that
+			// strip or rewrite it cause "Invalid `signature` in `thinking` block".
+			if blockType == "thinking" && msg.Role == "assistant" {
+				// Fix #a (aggressive): drop ALL assistant thinking blocks unconditionally.
+				// Anthropic rejects any thinking block whose signature was modified
+				// in transit (missing, truncated, re-encoded). The signature check
+				// alone misses these cases. Thinking is single-turn and clients don't
+				// depend on replaying it, so stripping is safe.
+				droppedThinking++
+				continue
+			}
+			filtered = append(filtered, block)
+		}
+		if droppedThinking > 0 {
+			common.SysLog(fmt.Sprintf("[claude-sanitize] dropped %d unsigned thinking block(s) from assistant message #%d", droppedThinking, i))
+		}
+		if len(filtered) == 0 {
+			filtered = []interface{}{map[string]interface{}{"type": "text", "text": " "}}
+		}
+		msg.Content = filtered
+	}
+}
+
+// fixUnsupportedThinking removes thinking config on models that do not support it.
+// Fix #c: haiku-4-5* rejects adaptive thinking (400 "adaptive thinking is not
+// supported on this model"). We strip Thinking (and the companion OutputConfig
+// effort hint) so the request is accepted as a normal completion call.
+func fixUnsupportedThinking(request *dto.ClaudeRequest) {
+	if request == nil || request.Thinking == nil {
+		return
+	}
+	model := request.Model
+	if strings.Contains(model, "haiku") && request.Thinking.Type == "adaptive" {
+		common.SysLog(fmt.Sprintf("[claude-sanitize] dropping adaptive thinking on unsupported model=%s", model))
+		request.Thinking = nil
+		request.OutputConfig = nil
+	}
+}
+
+// stripDeprecatedFields removes request fields that Anthropic now rejects.
+// Fix #d: 'output_format' was deprecated in favor of 'output_config.format';
+// newer SDKs upgraded but legacy clients still send it. We drop it so the
+// upstream stops returning 400 deprecated-field errors.
+func stripDeprecatedFields(request *dto.ClaudeRequest) {
+	if request == nil {
+		return
+	}
+	if len(request.OutputFormat) > 0 {
+		common.SysLog("[claude-sanitize] stripping deprecated output_format field")
+		request.OutputFormat = nil
+	}
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
@@ -43,7 +138,15 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	requestURL := fmt.Sprintf("%s/v1/messages", info.ChannelBaseUrl)
+	// Fall back to the default Anthropic base URL when the channel has no base_url
+	// configured (the test-channel path constructs RelayInfo without applying the
+	// channel-type default, so an empty value would otherwise produce a malformed
+	// request URL like "/v1/messages").
+	baseURL := info.ChannelBaseUrl
+	if baseURL == "" {
+		baseURL = channelconstant.ChannelBaseURLs[channelconstant.ChannelTypeAnthropic]
+	}
+	requestURL := fmt.Sprintf("%s/v1/messages", baseURL)
 	if !shouldAppendClaudeBetaQuery(info) {
 		return requestURL, nil
 	}
@@ -78,18 +181,9 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 		req.Set("anthropic-beta", anthropicBeta)
 	}
 	model_setting.GetClaudeSettings().WriteHeaders(info.OriginModelName, req)
-
-	// Filter beta flags for Bedrock compatibility when channel is AWS type
-	// Also filter for Anthropic channels that may proxy to Bedrock
-	if finalBeta := req.Get("anthropic-beta"); finalBeta != "" {
-		flags := strings.Split(finalBeta, ",")
-		filtered := relaycommon.FilterBedrockBetaFlags(flags)
-		if len(filtered) > 0 {
-			req.Set("anthropic-beta", strings.Join(filtered, ","))
-		} else {
-			req.Del("anthropic-beta")
-		}
-	}
+	// Note: Bedrock beta flag filtering is now done only in AWS adaptor (aws/dto.go).
+	// Anthropic-type channels (type=14) may proxy to either Anthropic API or Bedrock,
+	// and we cannot assume Bedrock constraints apply here.
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
