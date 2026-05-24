@@ -34,6 +34,9 @@ type CacheControlScan struct {
 	InSystem      int
 	InMessages    int
 	InTools       int
+	// Thinking 相关 — 用于诊断 "客户端发了 thinking.enabled 但模型不支持" 等问题
+	ThinkingType   string // "" | "enabled" | "adaptive" | other
+	ThinkingBudget int    // budget_tokens (0 if not set)
 }
 
 // Has reports whether anything was declared.
@@ -176,6 +179,12 @@ func DetectClaudeCacheControl(req *dto.ClaudeRequest) CacheControlScan {
 	s.InTools = scanTools(req.Tools)
 	s.TotalMarks = s.InSystem + s.InMessages + s.InTools
 	s.Declared = s.TotalMarks > 0
+	if req.Thinking != nil {
+		s.ThinkingType = req.Thinking.Type
+		if req.Thinking.BudgetTokens != nil {
+			s.ThinkingBudget = *req.Thinking.BudgetTokens
+		}
+	}
 	return s
 }
 
@@ -197,20 +206,27 @@ func DetectOpenAICacheControl(req *dto.GeneralOpenAIRequest) CacheControlScan {
 // MergeIntoOther writes the scan result into a map suitable for logs.other.
 // Only writes when something was declared, to avoid bloating untouched logs.
 func (s CacheControlScan) MergeIntoOther(other map[string]any) {
-	if !s.Declared {
+	if s.Declared {
+		other["cache_control_declared"] = true
+		other["cache_control_marks"] = s.TotalMarks
+		if s.InSystem > 0 {
+			other["cache_control_in_system"] = s.InSystem
+		}
+		if s.InMessages > 0 {
+			other["cache_control_in_messages"] = s.InMessages
+		}
+		if s.InTools > 0 {
+			other["cache_control_in_tools"] = s.InTools
+		}
+	} else {
 		// still record explicit "not declared" so D bucket is splittable in queries
 		other["cache_control_declared"] = false
-		return
 	}
-	other["cache_control_declared"] = true
-	other["cache_control_marks"] = s.TotalMarks
-	if s.InSystem > 0 {
-		other["cache_control_in_system"] = s.InSystem
-	}
-	if s.InMessages > 0 {
-		other["cache_control_in_messages"] = s.InMessages
-	}
-	if s.InTools > 0 {
-		other["cache_control_in_tools"] = s.InTools
+	// Always record thinking config if present (small overhead, useful for diagnostics)
+	if s.ThinkingType != "" {
+		other["thinking_type"] = s.ThinkingType
+		if s.ThinkingBudget > 0 {
+			other["thinking_budget"] = s.ThinkingBudget
+		}
 	}
 }
