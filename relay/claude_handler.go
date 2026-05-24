@@ -40,6 +40,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		c.Set("cache_control_scan", scan)
 	}
 
+	// Phase: validate-opus47-thinking-20260524 — reject thinking.type="enabled" on Opus 4.7.
+	// Anthropic silently accepts "enabled" but does NOT actually invoke extended thinking on
+	// this model, so the client pays for thinking without getting it. We return 400 here so
+	// clients know to use "adaptive" or model suffix -effort-*.
+	if validateErr := claudechannel.ValidateOpus47Thinking(claudeReq); validateErr != nil {
+		return types.NewErrorWithStatusCode(validateErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+
 	request, err := common.DeepCopy(claudeReq)
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ClaudeRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
