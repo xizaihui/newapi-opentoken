@@ -431,6 +431,10 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	claudeRequest.Prompt = ""
 	claudeRequest.Messages = claudeMessages
+	// Phase: claude-sanitize-20260524 — strip params incompatible with target model
+	// (e.g. Opus 4.7 rejects temperature/top_p/top_k/context_management;
+	// Sonnet 4.6 rejects both temperature+top_p set together)
+	SanitizeClaudeStruct(&claudeRequest)
 	return &claudeRequest, nil
 }
 

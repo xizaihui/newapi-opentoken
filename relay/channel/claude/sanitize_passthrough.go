@@ -101,6 +101,49 @@ func SanitizeClaudeRawBody(raw []byte) ([]byte, bool) {
 		}
 	}
 
+	// Fix #b: Opus 4.7 rejects temperature/top_p/top_k sampling params and
+	// context_management. Strip them so the request reaches Anthropic intact.
+	if strings.HasPrefix(model, "claude-opus-4-7") {
+		for _, k := range []string{"temperature", "top_p", "top_k"} {
+			if _, ok := payload[k]; ok {
+				delete(payload, k)
+				changed = true
+			}
+		}
+		if _, ok := payload["context_management"]; ok {
+			delete(payload, "context_management")
+			changed = true
+		}
+		// Fix #f: thinking.enabled → adaptive
+		if thinking, ok := payload["thinking"].(map[string]interface{}); ok {
+			if ttype, _ := thinking["type"].(string); ttype == "enabled" {
+				thinking["type"] = "adaptive"
+				if _, hasDisp := thinking["display"]; !hasDisp {
+					thinking["display"] = "summarized"
+				}
+				delete(thinking, "budget_tokens")
+				changed = true
+			}
+		}
+		if changed {
+			common.SysLog(fmt.Sprintf("[claude-sanitize] (passthrough) opus-4-7 strict params strip on model=%s", model))
+		}
+	}
+
+	// Fix #d: Sonnet 4.6 / 4.7 / Haiku 4.5 reject temperature+top_p together.
+	// Keep temperature, drop top_p.
+	if strings.HasPrefix(model, "claude-sonnet-4-6") ||
+		strings.HasPrefix(model, "claude-sonnet-4-7") ||
+		strings.HasPrefix(model, "claude-haiku-4-5") {
+		_, hasTemp := payload["temperature"]
+		_, hasTopP := payload["top_p"]
+		if hasTemp && hasTopP {
+			delete(payload, "top_p")
+			common.SysLog(fmt.Sprintf("[claude-sanitize] (passthrough) drop top_p (temp+top_p both set) on model=%s", model))
+			changed = true
+		}
+	}
+
 	if !changed {
 		return raw, false
 	}
