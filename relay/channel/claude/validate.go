@@ -27,6 +27,11 @@ import (
 //  - Haiku 系列 — 由 adaptor.go 的 fixUnsupportedThinking 处理
 //  - Opus 4.7 + thinking.type="adaptive" — 正确格式
 //  - Opus 4.7 不带 thinking 字段
+//
+// 错误消息注意事项：
+//   newapi 的 MaskSensitiveInfo 会用域名正则把 "thinking.type" 这种 X.Y 形态当成
+//   subdomain 脱敏成 "***"。错误消息里所有形如 X.Y 的字段引用都改成 backtick + 方括号
+//   语法（`thinking[type]=...`），避免脱敏破坏可读性。
 func ValidateOpus47Thinking(req *dto.ClaudeRequest) error {
 	if req == nil || req.Thinking == nil {
 		return nil
@@ -38,11 +43,12 @@ func ValidateOpus47Thinking(req *dto.ClaudeRequest) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"thinking.type=\"enabled\" is not supported on %s. "+
-			"Use thinking.type=\"adaptive\" with display=\"summarized\", "+
-			"or append model suffix -effort-high/medium/low for automatic conversion. "+
-			"Note: Anthropic silently accepts \"enabled\" but does not actually invoke "+
-			"extended thinking on this model.",
+		"`thinking[type]=enabled` is not supported on model %s. "+
+			"Use `thinking[type]=adaptive` together with `thinking[display]=summarized`, "+
+			"or change the model name to append suffix `-effort-high`/`-effort-medium`/`-effort-low` "+
+			"so the gateway converts it for you. "+
+			"Background: Anthropic silently accepts the legacy enabled form but does not "+
+			"actually invoke extended thinking on this model, so clients pay without getting the feature.",
 		req.Model,
 	)
 }
