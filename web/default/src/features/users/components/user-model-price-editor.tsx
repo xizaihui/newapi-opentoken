@@ -137,6 +137,12 @@ export function UserModelPriceEditor({ userId }: Props) {
         toast.error(`模型 "${r.model_name}" 的价格无效：${trimmed}`)
         return
       }
+      // 限制最多 4 位小数，避免运营误填超长小数
+      const dotIdx = trimmed.indexOf('.')
+      if (dotIdx >= 0 && trimmed.length - dotIdx - 1 > 4) {
+        toast.error(`模型 "${r.model_name}" 的价格最多支持 4 位小数：${trimmed}`)
+        return
+      }
       // 防误操作：价格 > 全局价 * 10 弹确认
       const globalPrice = modelPriceMap[r.model_name] ?? 0
       if (globalPrice > 0 && n > globalPrice * 10) {
@@ -211,7 +217,7 @@ export function UserModelPriceEditor({ userId }: Props) {
                       <Input
                         type='number'
                         min='0'
-                        step='0.01'
+                        step='0.0001'
                         placeholder='价格'
                         value={r.price}
                         onChange={(e) =>

@@ -72,6 +72,11 @@ export function UserGroupRatioEditor({ userId, groupOptions }: Props) {
         toast.error(`分组 "${g}" 的倍率无效：${trimmed}`)
         return
       }
+      const dotIdx = trimmed.indexOf('.')
+      if (dotIdx >= 0 && trimmed.length - dotIdx - 1 > 4) {
+        toast.error(`分组 "${g}" 的倍率最多支持 4 位小数：${trimmed}`)
+        return
+      }
       payload[g] = n
     }
     setSaving(true)
@@ -122,7 +127,7 @@ export function UserGroupRatioEditor({ userId, groupOptions }: Props) {
               <Input
                 type='number'
                 min='0'
-                step='0.01'
+                step='0.0001'
                 placeholder='留空 = 不覆盖'
                 value={ratiosInput[g] ?? ''}
                 onChange={(e) => handleChange(g, e.target.value)}
