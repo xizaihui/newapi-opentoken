@@ -282,6 +282,7 @@ func migrateDB() error {
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&UserGroupRatio{}, // Phase 2: per-user group ratio override
+		&UserModelPrice{}, // Phase 3: per-user model price override
 	)
 	if err != nil {
 		return err
