@@ -32,6 +32,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected *dto.ClaudeRequest, got %T", info.Request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	// Phase: cache-control-detect-20260524 — scan request for Anthropic
+	// prompt-caching markers (cache_control on system/messages/tools blocks).
+	// Result is consumed in PostTextConsumeQuota and written into logs.other,
+	// so dashboards can split the W=0 R=0 bucket into "未声明" vs "声明但 <1024 token 被忽略".
+	if scan := service.DetectClaudeCacheControl(claudeReq); true {
+		c.Set("cache_control_scan", scan)
+	}
+
 	request, err := common.DeepCopy(claudeReq)
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ClaudeRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())

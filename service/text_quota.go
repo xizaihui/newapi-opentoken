@@ -459,6 +459,14 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 
+	// Phase: cache-control-detect-20260524 — merge cache_control scan result
+	// produced by ClaudeHelper / TextHelper into the log's other field.
+	if raw, exists := ctx.Get("cache_control_scan"); exists {
+		if scan, ok := raw.(CacheControlScan); ok {
+			scan.MergeIntoOther(other)
+		}
+	}
+
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     summary.PromptTokens,
