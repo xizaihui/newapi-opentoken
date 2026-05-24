@@ -957,50 +957,28 @@ func TestAllChannels(c *gin.Context) {
 
 var autoTestChannelsOnce sync.Once
 
-// AutomaticallyTestChannels Phase: monitor-fix-20260524
-// 修复点：原实现 sleep 整段后才检查 enabled/frequency，导致：
-//  1. 关掉开关后还会再跑一次刚好醒来的测试
-//  2. 调整 frequency 后要等旧 frequency 时长睡完才生效
-// 现改为：每 30s 唤醒一次检查 enabled 和已等待时长是否达到当前 frequency
 func AutomaticallyTestChannels() {
 	// 只在Master节点定时测试渠道
 	if !common.IsMasterNode {
 		return
 	}
 	autoTestChannelsOnce.Do(func() {
-		const tickInterval = 30 * time.Second
-		var lastRun time.Time // 上一次测试完成的时间；零值时表示首次进入 enabled 状态
 		for {
-			time.Sleep(tickInterval)
-
-			setting := operation_setting.GetMonitorSetting()
-			if !setting.AutoTestChannelEnabled {
-				// 关闭状态：重置 lastRun，使下次开启时立即按完整 frequency 计时
-				lastRun = time.Time{}
+			if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
+				time.Sleep(1 * time.Minute)
 				continue
 			}
-
-			frequency := setting.AutoTestChannelMinutes
-			if frequency <= 0 {
-				frequency = 10 // 防御：不允许 <=0
+			for {
+				frequency := operation_setting.GetMonitorSetting().AutoTestChannelMinutes
+				time.Sleep(time.Duration(int(math.Round(frequency))) * time.Minute)
+				common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", frequency))
+				common.SysLog("automatically testing all channels")
+				_ = testAllChannels(false)
+				common.SysLog("automatically channel test finished")
+				if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
+					break
+				}
 			}
-			interval := time.Duration(int(math.Round(frequency))) * time.Minute
-
-			// 首次开启：起算点设为现在，等到下一个 interval 才跑（避免开启瞬间就跑一次）
-			if lastRun.IsZero() {
-				lastRun = time.Now()
-				continue
-			}
-
-			if time.Since(lastRun) < interval {
-				continue
-			}
-
-			common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", frequency))
-			common.SysLog("automatically testing all channels")
-			_ = testAllChannels(false)
-			common.SysLog("automatically channel test finished")
-			lastRun = time.Now()
 		}
 	})
 }
